@@ -13,39 +13,45 @@ exports.getLogs = async (req, res) => {
 
 exports.verifyFaceAndUnlock = async (req, res) => {
   try {
-    const { username, liveDescriptor } = req.body;
-    const user = await User.findOne({ username });
-    if (!user || !user.faceDescriptor || user.faceDescriptor.length === 0) {
-      return res.status(400).json({ success: false, message: "Tài khoản chưa đăng ký Face ID!" });
+    const { liveDescriptor } = req.body;
+    
+    // Lấy tất cả user đã có dữ liệu khuôn mặt trong Database
+    const users = await User.find({ faceDescriptor: { $exists: true, $ne: [] } });
+
+    if (users.length === 0) {
+      return res.status(400).json({ success: false, message: "Hệ thống chưa có dữ liệu khuôn mặt nào!" });
     }
 
-    let distance = 0;
-    for (let i = 0; i < 128; i++) {
-      distance += Math.pow(user.faceDescriptor[i] - liveDescriptor[i], 2);
+    let bestMatch = { username: null, distance: 1 }; // 1 là sai số tối đa
+
+    // Vòng lặp: Đem khuôn mặt vừa quét so sánh với từng người trong DB
+    for (const user of users) {
+      let distance = 0;
+      for (let i = 0; i < 128; i++) {
+        distance += Math.pow(user.faceDescriptor[i] - liveDescriptor[i], 2);
+      }
+      distance = Math.sqrt(distance);
+
+      // Nếu tìm thấy người giống hơn, cập nhật lại bestMatch
+      if (distance < bestMatch.distance) {
+        bestMatch = { username: user.username, distance: distance };
+      }
     }
-    distance = Math.sqrt(distance);
 
-   if (distance <= 0.45) {
-      // BẮN LOG RA TERMINAL CHO BẠN THẤY
-      console.log(`\n>>> [AI XÁC THỰC] Khuôn mặt khớp ${(1 - distance)*100}%. Chủ nhân: ${username}`);
-      console.log(">>> [MQTT] Đang gửi lệnh OPEN_DOOR xuống mạch ESP32...");
-
-      // 1. PUBLISH LỆNH MQTT XUỐNG ESP32 MỞ TỦ
-      req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: username }));
+    // Nếu sai số của người giống nhất <= 0.45 (tức là giống > 55%) -> Cho phép mở
+    if (bestMatch.distance <= 0.45) {
+      const matchedUser = bestMatch.username;
+      console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
       
-      // 2. Ghi Log vào DB
-      const newLog = new Log({ thiet_bi: "Web App", hanh_dong: "Mở Khóa Bằng Khuôn Mặt Thành Công" });
-      await newLog.save();
-
-      // 3. Báo cho ReactJS cập nhật giao diện
-      req.io.emit('co_nguoi_mo_tu', newLog);
-
-      return res.json({ success: true, message: `Khuôn mặt khớp ${((1 - distance)*100).toFixed(0)}%! Đã mở tủ.`});
+      // Bắn lệnh MQTT mở tủ
+      req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
+      
+      return res.json({ success: true, username: matchedUser });
     } else {
-      return res.status(400).json({ success: false, message: "Khuôn mặt không trùng khớp!" });
+      return res.status(400).json({ success: false, message: "Khuôn mặt lạ, không có quyền truy cập!" });
     }
   } catch (error) {
-    res.status(500).json({ success: false, message: "Lỗi hệ thống!" });
+    res.status(500).json({ success: false, message: "Lỗi hệ thống Backend!" });
   }
 };
 
