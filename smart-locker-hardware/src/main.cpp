@@ -6,32 +6,39 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <PubSubClient.h> // THƯ VIỆN MQTT BẮT BUỘC PHẢI CÓ
 
-// --- THÔNG TIN MẠNG (ĐIỀN CỦA BẠN VÀO ĐÂY) ---
+// --- THÔNG TIN MẠNG ---
 const char *ssid = "Co Thanh";
 const char *password = "66666666";
-// Nhớ đổi IP này thành IPv4 máy tính của bạn
-const char *serverName = "http://192.168.1.25:5000/api/test";
+const char *serverName = "http://192.168.1.25:5000/api/locker/test";
 
+// --- CẤU HÌNH MQTT BROKER ---
+const char *mqtt_server = "broker.hivemq.com";
+const int mqtt_port = 1883;
+const char *mqtt_topic_control = "myCTU/locker/control";
+
+WiFiClient espClient;
+PubSubClient mqttClient(espClient);
+
+// --- CẤU HÌNH PHẦN CỨNG ---
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define BUZZER_PIN 18
+#define RELAY_PIN 5 // Chân cắm Relay (Nếu chưa có dây thì không sao, code vẫn chạy)
 
-// --- CẤU HÌNH BÀN PHÍM MA TRẬN 4x4 ---
+// --- CẤU HÌNH BÀN PHÍM ---
 const byte ROWS = 4;
 const byte COLS = 4;
-
 char hexaKeys[ROWS][COLS] = {
     {'1', '2', '3', 'A'},
     {'4', '5', '6', 'B'},
     {'7', '8', '9', 'C'},
     {'*', '0', '#', 'D'}};
-
 byte rowPins[ROWS] = {13, 12, 14, 27};
 byte colPins[COLS] = {26, 25, 33, 32};
-
 Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
 
 enum LockerState
@@ -40,7 +47,6 @@ enum LockerState
   INPUTTING_PIN
 };
 LockerState currentState = LOCKED;
-
 String masterPIN = "123456";
 String enteredPIN = "";
 
@@ -81,6 +87,72 @@ void playKeyClickSound()
   customTone(BUZZER_PIN, 1800, 20);
 }
 
+// --- HÀM MỞ KHÓA TỦ ---
+void openLockerAction()
+{
+  Serial.println(">>> [RELAY] Dang mo chot cua!");
+  display.clearDisplay();
+  display.setTextSize(2);
+  display.setCursor(15, 20);
+  display.println("UNLOCKED!");
+  display.display();
+
+  digitalWrite(RELAY_PIN, LOW);
+  playSuccessSound();
+  delay(3000);
+  digitalWrite(RELAY_PIN, HIGH);
+
+  currentState = LOCKED;
+  enteredPIN = "";
+  display.clearDisplay();
+  display.setCursor(25, 20);
+  display.println("LOCKED");
+  display.display();
+}
+
+// --- HÀM LẮNG NGHE LỆNH MQTT ---
+void mqttCallback(char *topic, byte *payload, unsigned int length)
+{
+  String message = "";
+  for (unsigned int i = 0; i < length; i++)
+  {
+    message += (char)payload[i];
+  }
+  Serial.print(">>> [MQTT] Nhan lenh tu Node.js: ");
+  Serial.println(message);
+
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, message);
+  if (error)
+    return;
+
+  const char *command = doc["command"];
+  if (strcmp(command, "OPEN_DOOR") == 0)
+  {
+    Serial.println(">>> [XÁC NHẬN] AI nhan dien dung, tien hanh mo tu!");
+    openLockerAction();
+  }
+}
+
+// --- HÀM GIỮ KẾT NỐI MQTT ---
+void reconnectMQTT()
+{
+  while (!mqttClient.connected())
+  {
+    Serial.print(">>> [MQTT] Dang ket noi lai...");
+    String clientId = "ESP32Locker-" + String(random(0, 1000));
+    if (mqttClient.connect(clientId.c_str()))
+    {
+      Serial.println(" Thanh cong!");
+      mqttClient.subscribe(mqtt_topic_control);
+    }
+    else
+    {
+      delay(5000);
+    }
+  }
+}
+
 // --- HÀM GỬI DATA LÊN SERVER NODE.JS ---
 void sendDataToServer(bool isSuccess, String pinAttempt)
 {
@@ -90,36 +162,20 @@ void sendDataToServer(bool isSuccess, String pinAttempt)
     http.begin(serverName);
     http.addHeader("Content-Type", "application/json");
 
-    // Đóng gói JSON
     StaticJsonDocument<200> doc;
     doc["thiet_bi"] = "Tủ Khóa Chính";
-    doc["hanh_dong"] = isSuccess ? "Mở Khóa Thành Công" : "Cảnh Báo: Sai Mật Khẩu";
+    doc["hanh_dong"] = isSuccess ? "Mở Khóa Bằng PIN" : "Cảnh Báo: Sai Mật Khẩu";
     doc["ma_pin_da_nhap"] = pinAttempt;
 
     String requestBody;
     serializeJson(doc, requestBody);
-
     int httpResponseCode = http.POST(requestBody);
-
     if (httpResponseCode > 0)
-    {
-      Serial.print(">>> [SERVER] Đã nhận Log. Mã phản hồi: ");
-      Serial.println(httpResponseCode);
-    }
-    else
-    {
-      Serial.print(">>> [LỖI] Không gửi được. Mã lỗi: ");
-      Serial.println(httpResponseCode);
-    }
+      Serial.println(">>> [SERVER] Da gui Log thanh cong.");
     http.end();
-  }
-  else
-  {
-    Serial.println(">>> [WIFI] Mất kết nối, không thể gửi log!");
   }
 }
 
-// --- GIAO DIỆN HIỂN THỊ ---
 void drawInputScreen()
 {
   display.clearDisplay();
@@ -132,13 +188,9 @@ void drawInputScreen()
   for (int i = 0; i < 6; i++)
   {
     if (i < enteredPIN.length())
-    {
       display.print(enteredPIN[i]);
-    }
     else
-    {
       display.print("_");
-    }
   }
   display.display();
 }
@@ -147,15 +199,13 @@ void setup()
 {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-  {
-    Serial.println(F("Loi OLED!"));
     for (;;)
       ;
-  }
 
-  // Giao diện chờ bắt WiFi
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
@@ -163,7 +213,6 @@ void setup()
   display.println("CONNECTING WIFI...");
   display.display();
 
-  // Khởi động WiFi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -172,7 +221,9 @@ void setup()
   }
   Serial.println("\n[WIFI] Da ket noi!");
 
-  // Bắt xong thì vào giao diện Khóa
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setCallback(mqttCallback);
+
   display.clearDisplay();
   display.setTextSize(2);
   display.setCursor(25, 20);
@@ -182,14 +233,14 @@ void setup()
 
 void loop()
 {
-  char customKey = customKeypad.getKey();
+  if (!mqttClient.connected())
+    reconnectMQTT();
+  mqttClient.loop();
 
+  char customKey = customKeypad.getKey();
   if (customKey)
   {
     playKeyClickSound();
-    Serial.print("[KEYMAP] Nut vua bam: ");
-    Serial.println(customKey);
-
     switch (currentState)
     {
     case LOCKED:
@@ -201,7 +252,6 @@ void loop()
         drawInputScreen();
       }
       break;
-
     case INPUTTING_PIN:
       if (customKey == '*')
       {
@@ -210,36 +260,26 @@ void loop()
       }
       else if (customKey == '#')
       {
-        display.clearDisplay();
-        display.setTextSize(2);
-        display.setCursor(15, 20);
-
         bool isPassCorrect = (enteredPIN == masterPIN);
-
         if (isPassCorrect)
-        {
-          display.println("PASS OK!");
-          display.display();
-          playSuccessSound();
-        }
+          openLockerAction();
         else
         {
+          display.clearDisplay();
+          display.setTextSize(2);
+          display.setCursor(15, 20);
           display.println("SAI PASS!");
           display.display();
           playErrorSound();
+          delay(1500);
+          currentState = LOCKED;
+          enteredPIN = "";
+          display.clearDisplay();
+          display.setCursor(25, 20);
+          display.println("LOCKED");
+          display.display();
         }
-
-        // BẮN DATA LÊN SERVER NGAY TẠI ĐÂY
         sendDataToServer(isPassCorrect, enteredPIN);
-
-        delay(1500);
-
-        currentState = LOCKED;
-        enteredPIN = "";
-        display.clearDisplay();
-        display.setCursor(25, 20);
-        display.println("LOCKED");
-        display.display();
       }
       else if (customKey >= '0' && customKey <= '9')
       {

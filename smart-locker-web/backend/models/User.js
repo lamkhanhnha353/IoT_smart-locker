@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
     type: String, 
     required: true 
   },
+  faceDescriptor: { type: Array, required: false },
   role: {
     type: String,
     default: 'user' // Có thể nâng cấp thành 'admin' sau này
