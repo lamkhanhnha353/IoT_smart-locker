@@ -8,7 +8,7 @@ const FaceUnlock = () => {
   const [matchedName, setMatchedName] = useState("");
   const scanInterval = useRef(null); // Bộ đếm thời gian quét tự động
 
-  const BACKEND_URL = "";
+  const BACKEND_URL = "https://iot-smart-locker.onrender.com";
 
   useEffect(() => {
     const loadModels = async () => {
