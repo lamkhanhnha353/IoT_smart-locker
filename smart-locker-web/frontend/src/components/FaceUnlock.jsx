@@ -11,7 +11,7 @@ const FaceUnlock = () => {
  
 
 //   const BACKEND_URL = "http://localhost:5000";
-  const BACKEND_URL = "";
+  const BACKEND_URL = "https://iot-smart-locker.onrender.com";
   useEffect(() => {
     const loadModels = async () => {
       try {
