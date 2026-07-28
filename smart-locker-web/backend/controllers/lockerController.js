@@ -39,16 +39,15 @@ exports.verifyFaceAndUnlock = async (req, res) => {
     }
 
     // Nếu sai số của người giống nhất <= 0.45 (tức là giống > 55%) -> Cho phép mở
-    if (bestMatch.distance <= 0.45) {
+   if (bestMatch.distance <= 0.38) {
       const matchedUser = bestMatch.username;
       console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
       
-      // Bắn lệnh MQTT mở tủ
       req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
       
       return res.json({ success: true, username: matchedUser });
     } else {
-      return res.status(400).json({ success: false, message: "Khuôn mặt lạ, không có quyền truy cập!" });
+      return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
     }
   } catch (error) {
     res.status(500).json({ success: false, message: "Lỗi hệ thống Backend!" });
