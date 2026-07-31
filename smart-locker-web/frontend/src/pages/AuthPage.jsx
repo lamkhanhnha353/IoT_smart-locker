@@ -30,8 +30,8 @@ const AuthPage = () => {
   try {
         // Đã bổ sung http://localhost:5000 để đồng bộ với phần Đăng ký
         // const res = await axios.post('http://localhost:5000/api/auth/login', { username, password });
-        const res = await axios.post('[https://iot-smart-locker.onrender.com/api/auth/login](https://iot-smart-locker.onrender.com/api/auth/login)', { username, password });
-
+        // const res = await axios.post('[https://iot-smart-locker.onrender.com/api/auth/login](https://iot-smart-locker.onrender.com/api/auth/login)', { username, password });
+          const res = await axios.post('https://iot-smart-locker.onrender.com/api/auth/login', { username, password });
         if (res.data.success) {
           localStorage.setItem('token', res.data.token);
           localStorage.setItem('username', res.data.user.username);
@@ -58,7 +58,8 @@ const AuthPage = () => {
 
       try {
         // const res = await axios.post('http://localhost:5000/api/auth/register', { username, password });
-        const res = await axios.post('[https://iot-smart-locker.onrender.com/api/auth/register](https://iot-smart-locker.onrender.com/api/auth/register)', { username, password });
+        const res = await axios.post('https://iot-smart-locker.onrender.com/api/auth/register', { username, password });
+    
         if (res.data.success) {
           toast.success("Đăng ký thành công! Hãy đăng nhập nhé.");
           setIsLogin(true); 
