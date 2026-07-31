@@ -36,22 +36,38 @@ exports.login = async (req, res) => {
       { expiresIn: '1d' }
     );
 
-    res.json({ success: true, message: "Đăng nhập thành công!", token, user: { username: user.username, role: user.role }});
-  } catch (error) {
+    const hasFaceData = user.faceDescriptor && user.faceDescriptor.length > 0;
+
+    res.json({ 
+      success: true, 
+      token, 
+      user: { id: user._id, username: user.username },
+      hasFaceId: hasFaceData // <--- THÊM DÒNG NÀY
+    });
+
+    } catch (error) {
+    console.error(error);
     res.status(500).json({ success: false, message: "Lỗi server" });
-  }
+    }
 };
 
 exports.registerFace = async (req, res) => {
   try {
-    const { username, descriptor } = req.body;
-    const user = await User.findOne({ username });
+    const { descriptor } = req.body;
+    const userId = req.user.userId; // Lấy ID từ Token
+
+    if (!descriptor || descriptor.length !== 128) {
+      return res.status(400).json({ success: false, message: "Dữ liệu khuôn mặt không hợp lệ!" });
+    }
+
+    const user = await User.findById(userId);
     if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng!" });
 
     user.faceDescriptor = descriptor;
     await user.save();
     res.json({ success: true, message: "Cập nhật dữ liệu khuôn mặt thành công!" });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ success: false, message: "Lỗi server" });
   }
 };

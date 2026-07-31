@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import  { useEffect, useRef, useState } from 'react';
 import * as faceapi from 'face-api.js';
 
 const FaceUnlock = () => {
@@ -82,7 +82,8 @@ const FaceUnlock = () => {
   };
 
   const verifyFace = async (liveDescriptor) => {
-    try {
+   try {
+      // Đã sửa lại đường dẫn gọn gàng
       const response = await fetch(`${BACKEND_URL}/api/locker/verify-face`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

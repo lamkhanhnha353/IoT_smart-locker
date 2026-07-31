@@ -6,7 +6,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
-#include <PubSubClient.h> // THƯ VIỆN MQTT BẮT BUỘC PHẢI CÓ
+#include <PubSubClient.h>
+#include <ESP32Servo.h> // Thư viện Servo
 
 // --- THÔNG TIN MẠNG ---
 const char *ssid = "Co Thanh";
@@ -27,7 +28,8 @@ PubSubClient mqttClient(espClient);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define BUZZER_PIN 18
-#define RELAY_PIN 5 // Chân cắm Relay (Nếu chưa có dây thì không sao, code vẫn chạy)
+#define SERVO_PIN 19 // Chân tín hiệu Servo
+Servo lockServo;     // Khởi tạo đối tượng Servo
 
 // --- CẤU HÌNH BÀN PHÍM ---
 const byte ROWS = 4;
@@ -90,17 +92,22 @@ void playKeyClickSound()
 // --- HÀM MỞ KHÓA TỦ ---
 void openLockerAction()
 {
-  Serial.println(">>> [RELAY] Dang mo chot cua!");
+  Serial.println(">>> [LOCKER] Dang mo chot cua!");
   display.clearDisplay();
   display.setTextSize(2);
   display.setCursor(15, 20);
   display.println("UNLOCKED!");
   display.display();
 
-  digitalWrite(RELAY_PIN, LOW);
+  // 1. Kéo chốt ra (Mở cửa)
+  lockServo.write(90);
   playSuccessSound();
-  delay(3000);
-  digitalWrite(RELAY_PIN, HIGH);
+
+  // 2. Chờ sinh viên thao tác (5 giây)
+  delay(5000);
+
+  // 3. Đẩy chốt lại (Khóa tự động)
+  lockServo.write(0);
 
   currentState = LOCKED;
   enteredPIN = "";
@@ -108,6 +115,7 @@ void openLockerAction()
   display.setCursor(25, 20);
   display.println("LOCKED");
   display.display();
+  Serial.println(">>> [LOCKER] Da khoa tu tu dong!");
 }
 
 // --- HÀM LẮNG NGHE LỆNH MQTT ---
@@ -187,7 +195,7 @@ void drawInputScreen()
   display.setCursor(28, 30);
   for (int i = 0; i < 6; i++)
   {
-    if (i < enteredPIN.length())
+    if (i < (int)enteredPIN.length())
       display.print(enteredPIN[i]);
     else
       display.print("_");
@@ -199,8 +207,12 @@ void setup()
 {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
-  pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, HIGH);
+
+  // KHỞI TẠO SERVO
+  ESP32PWM::allocateTimer(0);
+  lockServo.setPeriodHertz(50);
+  lockServo.attach(SERVO_PIN, 500, 2400);
+  lockServo.write(0); // Vừa bật máy là khóa liền
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
     for (;;)
