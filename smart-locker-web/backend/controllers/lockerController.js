@@ -49,6 +49,24 @@ exports.verifyFaceAndUnlock = async (req, res) => {
     } else {
       return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
     }
+
+
+  // if (bestMatch.distance <= 0.28) {
+  //     const matchedUser = bestMatch.username;
+  //     console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
+      
+  //     // BỔ SUNG LỚP KHIÊN BẢO VỆ MQTT
+  //     if (req.mqttClient) {
+  //       req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
+  //     } else {
+  //       console.log("Cảnh báo: MQTT Client chưa sẵn sàng. Bỏ qua lệnh mở tủ phần cứng.");
+  //     }
+      
+  //     return res.json({ success: true, username: matchedUser });
+  //   } else {
+  //     return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
+  //   }
+
   } catch (error) {
     res.status(500).json({ success: false, message: "Lỗi hệ thống Backend!" });
   }
