@@ -39,7 +39,7 @@ exports.verifyFaceAndUnlock = async (req, res) => {
     }
 
     // Nếu sai số của người giống nhất <= 0.45 (tức là giống > 55%) -> Cho phép mở 0.38
-   if (bestMatch.distance <= 0.28) {
+   if (bestMatch.distance <= 0.48) {
       const matchedUser = bestMatch.username;
       console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
       

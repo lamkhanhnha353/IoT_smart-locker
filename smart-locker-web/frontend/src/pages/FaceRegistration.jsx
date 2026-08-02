@@ -107,15 +107,15 @@ const FaceRegistration = () => {
             if (distance < 0.30) {
          
               try {
-                const token = localStorage.getItem('token'); // Lấy vé từ ví
+                const token = localStorage.getItem('token'); 
                 
-                await axios.post('/api/auth/register-face', {
+                // ĐÃ SỬA: Thêm tên miền Backend (Render) vào phía trước
+                await axios.post('https://iot-smart-locker.onrender.com/api/auth/register-face', {
                   descriptor: firstDescriptorRef.current
                 }, {
-                  headers: { Authorization: `Bearer ${token}` } // Xuất trình vé cho Backend
+                  headers: { Authorization: `Bearer ${token}` } 
                 });
 
-             
                 localStorage.setItem('hasFaceId', 'true');
 
                 vibrate([500]); 
@@ -129,7 +129,7 @@ const FaceRegistration = () => {
                 tracks.forEach(track => track.stop());
 
                 setTimeout(() => {
-                  navigate('/dashboard'); // Bay thẳng vào Dashboard tổng
+                  navigate('/dashboard'); 
                 }, 2000);
                 
               } catch (error) {
