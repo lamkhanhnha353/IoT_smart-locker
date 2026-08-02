@@ -7,7 +7,8 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include <PubSubClient.h>
-#include <ESP32Servo.h> // Thư viện Servo
+#include <ESP32Servo.h>
+#include "DHT.h"
 
 // --- THÔNG TIN MẠNG ---
 const char *ssid = "Co Thanh";
@@ -28,8 +29,24 @@ PubSubClient mqttClient(espClient);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
 #define BUZZER_PIN 18
-#define SERVO_PIN 19 // Chân tín hiệu Servo
-Servo lockServo;     // Khởi tạo đối tượng Servo
+#define SERVO_PIN 19
+Servo lockServo;
+
+// --- CẤU HÌNH CẢM BIẾN MỚI ---
+#define DHTPIN 4
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+#define IR_PIN 5
+
+// --- BIẾN LƯU TRỮ TRẠNG THÁI ---
+unsigned long lastSensorUpdate = 0;
+float currentTemp = 0.0;
+float currentHum = 0.0;
+bool isLockerFull = false;
+
+// BẠN SỬA MỨC NHIỆT ĐỘ TEST Ở ĐÂY (TEST XONG ĐỔI THÀNH 45.0)
+float TEMP_THRESHOLD = 32.9;
 
 // --- CẤU HÌNH BÀN PHÍM ---
 const byte ROWS = 4;
@@ -52,7 +69,7 @@ LockerState currentState = LOCKED;
 String masterPIN = "123456";
 String enteredPIN = "";
 
-// --- HÀM ÂM THANH ---
+// --- CÁC HÀM ÂM THANH ---
 void customTone(int pin, int frequency, int duration)
 {
   if (frequency == 0)
@@ -89,6 +106,49 @@ void playKeyClickSound()
   customTone(BUZZER_PIN, 1800, 20);
 }
 
+// HÀM TIẾNG CÒI HÚ BÁO ĐỘNG
+void playAlarmSound()
+{
+  customTone(BUZZER_PIN, 1000, 300);
+  delay(100);
+  customTone(BUZZER_PIN, 2000, 300);
+  delay(100);
+}
+
+// --- HÀM GIAO DIỆN CHỜ THÔNG MINH ---
+void drawLockedScreen()
+{
+  display.clearDisplay();
+
+  // GÓC TRÊN: Trạng thái tủ
+  display.setTextSize(1);
+  display.setTextColor(WHITE);
+  display.setCursor(0, 0);
+  if (isLockerFull)
+  {
+    display.print("Tu: DANG CO DO");
+  }
+  else
+  {
+    display.print("Tu: TRONG");
+  }
+
+  // GIỮA: Chữ LOCKED to rõ
+  display.setTextSize(2);
+  display.setCursor(25, 25);
+  display.print("LOCKED");
+
+  // GÓC DƯỚI: Nhiệt độ & Độ ẩm
+  display.setTextSize(1);
+  display.setCursor(0, 55);
+  display.print(currentTemp > 0 ? String(currentTemp, 1) : "--");
+  display.print("C | ");
+  display.print(currentHum > 0 ? String(currentHum, 0) : "--");
+  display.print("%");
+
+  display.display();
+}
+
 // --- HÀM MỞ KHÓA TỦ ---
 void openLockerAction()
 {
@@ -103,22 +163,27 @@ void openLockerAction()
   lockServo.write(90);
   playSuccessSound();
 
-  // 2. Chờ sinh viên thao tác (5 giây)
+  // BẮN TIN BÁO WEB: CỬA ĐANG MỞ!
+  String payloadOpen = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": true, \"isFireWarning\": false}";
+  mqttClient.publish("myCTU/locker/sensor", payloadOpen.c_str());
+
+  // 2. Chờ sinh viên lấy đồ (5 giây)
   delay(5000);
 
   // 3. Đẩy chốt lại (Khóa tự động)
   lockServo.write(0);
-
   currentState = LOCKED;
   enteredPIN = "";
-  display.clearDisplay();
-  display.setCursor(25, 20);
-  display.println("LOCKED");
-  display.display();
   Serial.println(">>> [LOCKER] Da khoa tu tu dong!");
+
+  // BẮN TIN BÁO WEB: CỬA ĐÃ KHÓA!
+  String payloadClosed = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": false, \"isFireWarning\": false}";
+  mqttClient.publish("myCTU/locker/sensor", payloadClosed.c_str());
+
+  drawLockedScreen();
 }
 
-// --- HÀM LẮNG NGHE LỆNH MQTT ---
+// --- HÀM LẮNG NGHE LỆNH MQTT TỪ WEB ---
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
   String message = "";
@@ -161,7 +226,7 @@ void reconnectMQTT()
   }
 }
 
-// --- HÀM GỬI DATA LÊN SERVER NODE.JS ---
+// --- HÀM GỬI LỊCH SỬ LÊN NODE.JS ---
 void sendDataToServer(bool isSuccess, String pinAttempt)
 {
   if (WiFi.status() == WL_CONNECTED)
@@ -184,6 +249,7 @@ void sendDataToServer(bool isSuccess, String pinAttempt)
   }
 }
 
+// --- HÀM VẼ GIAO DIỆN NHẬP PIN ---
 void drawInputScreen()
 {
   display.clearDisplay();
@@ -203,16 +269,21 @@ void drawInputScreen()
   display.display();
 }
 
+
 void setup()
 {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
 
+  // KHỞI TẠO CẢM BIẾN
+  dht.begin();
+  pinMode(IR_PIN, INPUT);
+
   // KHỞI TẠO SERVO
   ESP32PWM::allocateTimer(0);
   lockServo.setPeriodHertz(50);
   lockServo.attach(SERVO_PIN, 500, 2400);
-  lockServo.write(0); // Vừa bật máy là khóa liền
+  lockServo.write(0);
 
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
     for (;;)
@@ -236,11 +307,7 @@ void setup()
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
 
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(25, 20);
-  display.println("LOCKED");
-  display.display();
+  drawLockedScreen();
 }
 
 void loop()
@@ -249,6 +316,56 @@ void loop()
     reconnectMQTT();
   mqttClient.loop();
 
+  // --- CẬP NHẬT CẢM BIẾN NGẦM & CẢNH BÁO ---
+  if (currentState == LOCKED)
+  {
+    if (millis() - lastSensorUpdate >= 2000)
+    {
+      lastSensorUpdate = millis();
+
+      isLockerFull = (digitalRead(IR_PIN) == LOW);
+      float h = dht.readHumidity();
+      float t = dht.readTemperature();
+      if (!isnan(h) && !isnan(t))
+      {
+        currentTemp = t;
+        currentHum = h;
+      }
+
+      // Xử lý Cảnh báo nhiệt độ
+      bool isFireWarning = false;
+      if (currentTemp >= TEMP_THRESHOLD)
+      {
+        isFireWarning = true;
+        Serial.println(">>> [CẢNH BÁO] Nhiệt độ trong tủ quá cao! Hú còi!");
+
+        display.clearDisplay();
+        display.setTextColor(WHITE);
+        display.setTextSize(2);
+        display.setCursor(20, 10);
+        display.println("WARNING!");
+        display.setTextSize(1);
+        display.setCursor(15, 40);
+        display.print("Nhiet do: ");
+        display.print(currentTemp);
+        display.print(" C");
+        display.display();
+
+        playAlarmSound();
+      }
+      else
+      {
+        drawLockedScreen();
+      }
+
+      // Đóng gói data gửi lên Web
+      String payload = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": false, \"isFireWarning\": " + (isFireWarning ? "true" : "false") + "}";
+      mqttClient.publish("myCTU/locker/sensor", payload.c_str());
+      Serial.println(">>> [MQTT] Đã gửi data: " + payload);
+    }
+  }
+
+  // --- XỬ LÝ BÀN PHÍM ---
   char customKey = customKeypad.getKey();
   if (customKey)
   {
@@ -274,7 +391,9 @@ void loop()
       {
         bool isPassCorrect = (enteredPIN == masterPIN);
         if (isPassCorrect)
+        {
           openLockerAction();
+        }
         else
         {
           display.clearDisplay();
@@ -284,12 +403,10 @@ void loop()
           display.display();
           playErrorSound();
           delay(1500);
+
           currentState = LOCKED;
           enteredPIN = "";
-          display.clearDisplay();
-          display.setCursor(25, 20);
-          display.println("LOCKED");
-          display.display();
+          drawLockedScreen();
         }
         sendDataToServer(isPassCorrect, enteredPIN);
       }
