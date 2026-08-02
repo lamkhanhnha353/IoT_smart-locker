@@ -104,7 +104,7 @@ const FaceRegistration = () => {
             distance = Math.sqrt(distance);
 
          
-            if (distance < 0.30) {
+            if (distance < 0.45) {
          
               try {
                 const token = localStorage.getItem('token'); 
