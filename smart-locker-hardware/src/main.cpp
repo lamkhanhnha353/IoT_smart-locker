@@ -13,7 +13,7 @@
 // --- THÔNG TIN MẠNG ---
 const char *ssid = "Co Thanh";
 const char *password = "66666666";
-const char *serverName = "http://192.168.1.25:5000/api/locker/test";
+const char *serverName = "https://iot-smart-locker.onrender.com/api/locker/test";
 
 // --- CẤU HÌNH MQTT BROKER ---
 const char *mqtt_server = "broker.hivemq.com";

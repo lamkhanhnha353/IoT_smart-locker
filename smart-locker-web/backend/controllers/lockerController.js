@@ -79,10 +79,30 @@ exports.verifyFaceAndUnlock = async (req, res) => {
       const matchedUser = bestMatch.username;
       console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
       
+     
       req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
+ 
+      try {
+        const newLog = new Log({
+          thiet_bi: "Camera AI",
+          hanh_dong: `Mở Khóa Bằng Khuôn Mặt (${matchedUser})`
+        });
+        await newLog.save();
+        
       
+        if (req.io) {
+          req.io.emit('co_nguoi_mo_tu', newLog);
+        }
+      } catch (logErr) {
+        console.error(">>> [DATABASE] Lỗi lưu lịch sử Face ID:", logErr);
+      }
+    
+
       return res.json({ success: true, username: matchedUser });
+      
     } else {
+      
+      console.log("\n>>> [CẢNH BÁO AI] Phát hiện khuôn mặt lạ!");
       return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
     }
 
