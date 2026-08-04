@@ -1,4 +1,3 @@
-
 const Log = require('../models/Log');
 const User = require('../models/User');
 
@@ -8,6 +7,43 @@ exports.getLogs = async (req, res) => {
     res.json(logs);
   } catch (error) {
     res.status(500).json({ message: "Lỗi server!" });
+  }
+};
+
+
+exports.controlLocker = async (req, res) => {
+  try {
+    const { command } = req.body;
+
+    if (command === 'OPEN_DOOR') {
+      console.log(`\n>>> [BÁO ĐỘNG] Gửi lệnh MỞ CỬA KHẨN CẤP xuống Tủ (ESP32)!`);
+
+      // 1. Bắn lệnh qua MQTT xuống phần cứng
+      if (req.mqttClient) {
+        req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: 'Khẩn cấp' }));
+      } else {
+        console.log("Cảnh báo: MQTT Client chưa sẵn sàng!");
+      }
+
+      // 2. Lưu luôn hành động này vào Database để làm bằng chứng
+      const newLog = new Log({
+        thiet_bi: "Tủ Khóa Chính",
+        hanh_dong: "🔓 MỞ CỬA KHẨN CẤP (QUÁ NHIỆT)"
+      });
+      await newLog.save();
+      
+      // 3. Bắn Socket ra ngoài Web để bảng Lịch sử tự động thêm 1 dòng mới
+      if (req.io) {
+        req.io.emit('co_nguoi_mo_tu', newLog);
+      }
+
+      return res.json({ success: true, message: "Đã gửi lệnh mở cửa khẩn cấp thành công!" });
+    }
+
+    return res.status(400).json({ success: false, message: "Lệnh không hợp lệ!" });
+  } catch (error) {
+    console.error("Lỗi điều khiển tủ:", error);
+    res.status(500).json({ success: false, message: "Lỗi hệ thống Backend!" });
   }
 };
 
@@ -49,23 +85,6 @@ exports.verifyFaceAndUnlock = async (req, res) => {
     } else {
       return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
     }
-
-
-  // if (bestMatch.distance <= 0.28) {
-  //     const matchedUser = bestMatch.username;
-  //     console.log(`\n>>> [AI TỰ ĐỘNG] Nhận diện thành công. Chủ nhân: ${matchedUser}`);
-      
-  //     // BỔ SUNG LỚP KHIÊN BẢO VỆ MQTT
-  //     if (req.mqttClient) {
-  //       req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
-  //     } else {
-  //       console.log("Cảnh báo: MQTT Client chưa sẵn sàng. Bỏ qua lệnh mở tủ phần cứng.");
-  //     }
-      
-  //     return res.json({ success: true, username: matchedUser });
-  //   } else {
-  //     return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
-  //   }
 
   } catch (error) {
     res.status(500).json({ success: false, message: "Lỗi hệ thống Backend!" });

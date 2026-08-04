@@ -1,16 +1,16 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify'; 
 import axios from 'axios';
 import { io } from 'socket.io-client';
 
+// Đổi lại localhost nếu bạn đang chạy local nhé
+// const BACKEND_URL = "http://localhost:5000"; 
 const BACKEND_URL = "https://iot-smart-locker.onrender.com"; 
 
-// const BACKEND_URL = "http://localhost:5000"; 
 const socket = io(BACKEND_URL, {
   transports: ['websocket'] // Ép dùng chuẩn Websocket để trị bệnh spam log
 });
-
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -27,8 +27,15 @@ const Dashboard = () => {
     isDoorOpen: false 
   });
 
+  // --- STATE VÀ REF QUẢN LÝ BÁO ĐỘNG ---
+  const [isFireAlert, setIsFireAlert] = useState(false);
+  const audioRef = useRef(null);
 
   useEffect(() => {
+    // Khởi tạo file âm thanh cảnh báo (Lặp lại liên tục)
+    audioRef.current = new Audio('/alarm.mp3');
+    audioRef.current.loop = true;
+
     // Thêm log kiểm tra Socket kết nối
     socket.on('connect', () => {
       console.log('✅ [SOCKET] Đã kết nối tới Backend thành công! ID:', socket.id);
@@ -48,24 +55,44 @@ const Dashboard = () => {
     fetchLogs();
 
     socket.on('co_nguoi_mo_tu', (newLog) => {
-      console.log('🔥 [SOCKET NHẬN] Có người vừa mở tủ:', newLog); // LOG Ở ĐÂY
+      console.log('🔥 [SOCKET NHẬN] Có người vừa mở tủ:', newLog);
       setLogs((prevLogs) => [newLog, ...prevLogs].slice(0, 20));
     });
 
     socket.on('sensor_update', (data) => {
-      console.log('💧 [SOCKET NHẬN] Data Cảm biến:', data); // LOG Ở ĐÂY
+      console.log('💧 [SOCKET NHẬN] Data Cảm biến:', data);
       setLockerStatus({
         temp: data.temp,
         humidity: data.humidity,
         isFull: data.isFull,
         isDoorOpen: data.isDoorOpen
       });
+
+      // --- BẮT CỜ CẢNH BÁO CHÁY TỪ ESP32 ---
+      if (data.isFireWarning) {
+        setIsFireAlert(true);
+        // Kích hoạt phát âm thanh (thêm catch để tránh lỗi block autoplay)
+        if (audioRef.current) {
+          audioRef.current.play().catch(err => console.log("Trình duyệt tạm chặn âm thanh:", err));
+        }
+      } else {
+        // Nếu nhiệt độ hạ xuống bình thường thì tự động tắt cảnh báo và tắt còi
+        setIsFireAlert(false);
+        if (audioRef.current) {
+          audioRef.current.pause();
+          audioRef.current.currentTime = 0;
+        }
+      }
     });
 
     return () => {
       socket.off('connect');
       socket.off('co_nguoi_mo_tu');
       socket.off('sensor_update');
+      // Dọn dẹp âm thanh khi rời khỏi trang
+      if (audioRef.current) {
+        audioRef.current.pause();
+      }
     };
   }, []);
 
@@ -81,6 +108,37 @@ const Dashboard = () => {
     setTimeout(() => {
       navigate('/'); 
     }, 1000);
+  };
+
+  // --- HÀM 1: GỬI LỆNH MỞ CỬA KHẨN CẤP XUỐNG ESP32 ---
+  const handleEmergencyOpen = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(`${BACKEND_URL}/api/locker/control`, { command: 'OPEN_DOOR' }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.warn('Đã gửi lệnh mở cửa khẩn cấp xuống tủ!');
+      
+      // Tắt còi và ẩn cảnh báo đỏ
+      setIsFireAlert(false);
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    } catch (error) {
+      console.error("Lỗi mở cửa khẩn cấp", error);
+      toast.error('Không thể gửi lệnh mở cửa!');
+    }
+  };
+
+  // --- HÀM 2: TẮT GIAO DIỆN BÁO ĐỘNG TẠM THỜI ---
+  const handleDismissAlert = () => {
+    setIsFireAlert(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+    toast.info('Đã ẩn cảnh báo khẩn cấp.');
   };
 
   return (
@@ -170,7 +228,8 @@ const Dashboard = () => {
                   <tr key={log._id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
                     <td className="py-4 px-4 font-medium text-blue-300">{log.thiet_bi}</td>
                     <td className="py-4 px-4">
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${log.hanh_dong.includes('Sai') ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                      {/* Đã cập nhật logic màu sắc để bắt thêm chữ Cảnh Báo và CHÁY */}
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${log.hanh_dong.includes('Sai') || log.hanh_dong.includes('Cảnh báo') || log.hanh_dong.includes('CHÁY') ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                         {log.hanh_dong}
                       </span>
                     </td>
@@ -189,6 +248,42 @@ const Dashboard = () => {
         </div>
 
       </div>
+
+      {/* ================= MODAL BÁO ĐỘNG ĐỎ (QUÁ NHIỆT / CHÁY NỔ) ================= */}
+      {isFireAlert && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
+          <div className="bg-red-600 text-white p-8 md:p-10 rounded-3xl shadow-[0_0_50px_rgba(239,68,68,0.8)] w-full max-w-xl text-center animate-pulse border-4 border-red-300 space-y-6">
+            
+            <div className="text-7xl">🔥</div>
+            
+            <h1 className="text-3xl md:text-4xl font-black uppercase tracking-wider text-yellow-300">
+              CẢNH BÁO QUÁ NHIỆT!
+            </h1>
+            
+            <p className="text-lg md:text-xl font-medium leading-relaxed">
+              Nhiệt độ bên trong tủ đang đạt mức nguy hiểm <span className="font-bold underline">({lockerStatus.temp}°C)</span>! Nguy cơ cháy nổ thiết bị điện tử. Vui lòng xử lý ngay lập tức!
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+              <button 
+                onClick={handleEmergencyOpen}
+                className="bg-white text-red-700 hover:bg-slate-100 font-extrabold py-4 px-6 rounded-2xl text-lg transition-all shadow-xl active:scale-95 flex items-center justify-center gap-2"
+              >
+                🔓 MỞ CỬA KHẨN CẤP
+              </button>
+              
+              <button 
+                onClick={handleDismissAlert}
+                className="bg-red-900/80 hover:bg-red-900 text-white font-bold py-4 px-6 rounded-2xl text-lg transition-all border border-red-400 active:scale-95 flex items-center justify-center gap-2"
+              >
+                ✅ ĐÃ XỬ LÝ (TẮT CÒI)
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
