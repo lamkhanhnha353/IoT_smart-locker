@@ -4,12 +4,10 @@ import { toast } from 'react-toastify';
 import axios from 'axios';
 import { io } from 'socket.io-client';
 
-// Đổi lại localhost nếu bạn đang chạy local nhé
-// const BACKEND_URL = "http://localhost:5000"; 
-const BACKEND_URL = "https://iot-smart-locker.onrender.com"; 
-
+// const BACKEND_URL = "https://iot-smart-locker.onrender.com"; 
+const BACKEND_URL = "https://iot-smart-locker.onrender.com";
 const socket = io(BACKEND_URL, {
-  transports: ['websocket'] // Ép dùng chuẩn Websocket để trị bệnh spam log
+  transports: ['websocket'] 
 });
 
 const Dashboard = () => {
@@ -18,7 +16,6 @@ const Dashboard = () => {
   const username = localStorage.getItem('username') || 'Sinh viên';
   const [hasFaceId, setHasFaceId] = useState(localStorage.getItem('hasFaceId') === 'true');
 
-  // Dữ liệu thật sẽ được lưu vào đây
   const [logs, setLogs] = useState([]);
   const [lockerStatus, setLockerStatus] = useState({ 
     temp: 0, 
@@ -27,16 +24,17 @@ const Dashboard = () => {
     isDoorOpen: false 
   });
 
-  // --- STATE VÀ REF QUẢN LÝ BÁO ĐỘNG ---
   const [isFireAlert, setIsFireAlert] = useState(false);
   const audioRef = useRef(null);
 
+  // --- STATE DÀNH CHO PHÂN TRANG ---
+  const [currentPage, setCurrentPage] = useState(1);
+  const logsPerPage = 5; // Hiển thị 5 dòng mỗi trang
+
   useEffect(() => {
-    // Khởi tạo file âm thanh cảnh báo (Lặp lại liên tục)
     audioRef.current = new Audio('/alarm.mp3');
     audioRef.current.loop = true;
 
-    // Thêm log kiểm tra Socket kết nối
     socket.on('connect', () => {
       console.log('✅ [SOCKET] Đã kết nối tới Backend thành công! ID:', socket.id);
     });
@@ -56,11 +54,10 @@ const Dashboard = () => {
 
     socket.on('co_nguoi_mo_tu', (newLog) => {
       console.log('🔥 [SOCKET NHẬN] Có người vừa mở tủ:', newLog);
-      setLogs((prevLogs) => [newLog, ...prevLogs].slice(0, 20));
+      setLogs((prevLogs) => [newLog, ...prevLogs]); // Bỏ slice để giữ toàn bộ log cho phân trang
     });
 
     socket.on('sensor_update', (data) => {
-      console.log('💧 [SOCKET NHẬN] Data Cảm biến:', data);
       setLockerStatus({
         temp: data.temp,
         humidity: data.humidity,
@@ -68,15 +65,12 @@ const Dashboard = () => {
         isDoorOpen: data.isDoorOpen
       });
 
-      // --- BẮT CỜ CẢNH BÁO CHÁY TỪ ESP32 ---
       if (data.isFireWarning) {
         setIsFireAlert(true);
-        // Kích hoạt phát âm thanh (thêm catch để tránh lỗi block autoplay)
         if (audioRef.current) {
           audioRef.current.play().catch(err => console.log("Trình duyệt tạm chặn âm thanh:", err));
         }
       } else {
-        // Nếu nhiệt độ hạ xuống bình thường thì tự động tắt cảnh báo và tắt còi
         setIsFireAlert(false);
         if (audioRef.current) {
           audioRef.current.pause();
@@ -89,7 +83,6 @@ const Dashboard = () => {
       socket.off('connect');
       socket.off('co_nguoi_mo_tu');
       socket.off('sensor_update');
-      // Dọn dẹp âm thanh khi rời khỏi trang
       if (audioRef.current) {
         audioRef.current.pause();
       }
@@ -110,7 +103,6 @@ const Dashboard = () => {
     }, 1000);
   };
 
-  // --- HÀM 1: GỬI LỆNH MỞ CỬA KHẨN CẤP XUỐNG ESP32 ---
   const handleEmergencyOpen = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -119,7 +111,6 @@ const Dashboard = () => {
       });
       toast.warn('Đã gửi lệnh mở cửa khẩn cấp xuống tủ!');
       
-      // Tắt còi và ẩn cảnh báo đỏ
       setIsFireAlert(false);
       if (audioRef.current) {
         audioRef.current.pause();
@@ -131,7 +122,6 @@ const Dashboard = () => {
     }
   };
 
-  // --- HÀM 2: TẮT GIAO DIỆN BÁO ĐỘNG TẠM THỜI ---
   const handleDismissAlert = () => {
     setIsFireAlert(false);
     if (audioRef.current) {
@@ -141,10 +131,22 @@ const Dashboard = () => {
     toast.info('Đã ẩn cảnh báo khẩn cấp.');
   };
 
+  // --- LOGIC TÍNH TOÁN PHÂN TRANG ---
+  const indexOfLastLog = currentPage * logsPerPage;
+  const indexOfFirstLog = indexOfLastLog - logsPerPage;
+  const currentLogs = logs.slice(indexOfFirstLog, indexOfLastLog);
+  const totalPages = Math.ceil(logs.length / logsPerPage);
+
+  const nextPage = () => {
+    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
+  };
+  const prevPage = () => {
+    if (currentPage > 1) setCurrentPage(currentPage - 1);
+  };
+
   return (
     <div className="min-h-screen bg-slate-900 text-slate-200 font-sans relative">
       
-      {/* KIỂM TRA FACE ID */}
       {!hasFaceId && (
         <div className="absolute inset-0 z-50 bg-slate-900/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-800 p-8 rounded-2xl shadow-2xl max-w-md w-full text-center border border-rose-500/30">
@@ -179,7 +181,7 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* THÔNG SỐ CẢM BIẾN REAL-TIME */}
+        {/* THÔNG SỐ CẢM BIẾN */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex items-center justify-between">
             <div>
@@ -211,10 +213,10 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* BẢNG LỊCH SỬ THẬT TỪ MONGODB */}
-        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg">
-          <h2 className="text-lg font-bold text-white mb-4">Nhật ký hoạt động gần đây</h2>
-          <div className="overflow-x-auto">
+        {/* BẢNG LỊCH SỬ CÓ PHÂN TRANG */}
+        <div className="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-lg flex flex-col">
+          <h2 className="text-lg font-bold text-white mb-4">Nhật ký hoạt động</h2>
+          <div className="overflow-x-auto min-h-[350px]">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-700 text-slate-400 text-sm">
@@ -224,12 +226,11 @@ const Dashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {logs.length > 0 ? logs.map((log) => (
+                {currentLogs.length > 0 ? currentLogs.map((log) => (
                   <tr key={log._id} className="border-b border-slate-700/50 hover:bg-slate-700/20 transition-colors">
                     <td className="py-4 px-4 font-medium text-blue-300">{log.thiet_bi}</td>
                     <td className="py-4 px-4">
-                      {/* Đã cập nhật logic màu sắc để bắt thêm chữ Cảnh Báo và CHÁY */}
-                      <span className={`px-2 py-1 rounded text-xs font-bold ${log.hanh_dong.includes('Sai') || log.hanh_dong.includes('Cảnh báo') || log.hanh_dong.includes('CHÁY') ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${log.hanh_dong.includes('Sai') || log.hanh_dong.includes('Cảnh báo') || log.hanh_dong.includes('CHÁY') || log.hanh_dong.includes('KHẨN CẤP') ? 'bg-rose-500/20 text-rose-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
                         {log.hanh_dong}
                       </span>
                     </td>
@@ -245,25 +246,46 @@ const Dashboard = () => {
               </tbody>
             </table>
           </div>
+          
+          {/* Controls Phân trang */}
+          {totalPages > 1 && (
+            <div className="flex justify-between items-center mt-4 pt-4 border-t border-slate-700">
+              <span className="text-sm text-slate-400">
+                Trang {currentPage} / {totalPages}
+              </span>
+              <div className="flex gap-2">
+                <button 
+                  onClick={prevPage} 
+                  disabled={currentPage === 1}
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${currentPage === 1 ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600'}`}
+                >
+                  ◀ Trước
+                </button>
+                <button 
+                  onClick={nextPage} 
+                  disabled={currentPage === totalPages}
+                  className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${currentPage === totalPages ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed' : 'bg-slate-700 text-white hover:bg-slate-600'}`}
+                >
+                  Sau ▶
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
       </div>
 
-      {/* ================= MODAL BÁO ĐỘNG ĐỎ (QUÁ NHIỆT / CHÁY NỔ) ================= */}
+      {/* MODAL BÁO ĐỘNG */}
       {isFireAlert && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-md p-4">
           <div className="bg-red-600 text-white p-8 md:p-10 rounded-3xl shadow-[0_0_50px_rgba(239,68,68,0.8)] w-full max-w-xl text-center animate-pulse border-4 border-red-300 space-y-6">
-            
             <div className="text-7xl">🔥</div>
-            
             <h1 className="text-3xl md:text-4xl font-black uppercase tracking-wider text-yellow-300">
               CẢNH BÁO QUÁ NHIỆT!
             </h1>
-            
             <p className="text-lg md:text-xl font-medium leading-relaxed">
               Nhiệt độ bên trong tủ đang đạt mức nguy hiểm <span className="font-bold underline">({lockerStatus.temp}°C)</span>! Nguy cơ cháy nổ thiết bị điện tử. Vui lòng xử lý ngay lập tức!
             </p>
-
             <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
               <button 
                 onClick={handleEmergencyOpen}
@@ -271,7 +293,6 @@ const Dashboard = () => {
               >
                 🔓 MỞ CỬA KHẨN CẤP
               </button>
-              
               <button 
                 onClick={handleDismissAlert}
                 className="bg-red-900/80 hover:bg-red-900 text-white font-bold py-4 px-6 rounded-2xl text-lg transition-all border border-red-400 active:scale-95 flex items-center justify-center gap-2"
@@ -279,7 +300,6 @@ const Dashboard = () => {
                 ✅ ĐÃ XỬ LÝ (TẮT CÒI)
               </button>
             </div>
-
           </div>
         </div>
       )}

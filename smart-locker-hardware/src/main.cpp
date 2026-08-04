@@ -239,12 +239,17 @@ void reconnectMQTT()
 }
 
 // --- HÀM GỬI LỊCH SỬ LÊN NODE.JS ---
+// --- HÀM GỬI LỊCH SỬ LÊN NODE.JS (ĐÃ NÂNG CẤP HTTPS) ---
 void sendDataToServer(bool isSuccess, String pinAttempt)
 {
   if (WiFi.status() == WL_CONNECTED)
   {
+    // Tạo client bảo mật và bỏ qua check chứng chỉ SSL
+    WiFiClientSecure *client = new WiFiClientSecure;
+    client->setInsecure();
+
     HTTPClient http;
-    http.begin(serverName);
+    http.begin(*client, serverName);
     http.addHeader("Content-Type", "application/json");
 
     StaticJsonDocument<200> doc;
@@ -254,10 +259,19 @@ void sendDataToServer(bool isSuccess, String pinAttempt)
 
     String requestBody;
     serializeJson(doc, requestBody);
+
     int httpResponseCode = http.POST(requestBody);
     if (httpResponseCode > 0)
-      Serial.println(">>> [SERVER] Da gui Log thanh cong.");
+    {
+      Serial.println(">>> [SERVER] Da gui Log len Render thanh cong!");
+    }
+    else
+    {
+      Serial.println(">>> [LỖI] Khong the gui Log. Ma loi: " + String(httpResponseCode));
+    }
+
     http.end();
+    delete client; // Giải phóng bộ nhớ
   }
 }
 

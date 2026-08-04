@@ -62,7 +62,7 @@ mqttClient.on('message', async (topic, message) => {
       const data = JSON.parse(message.toString());
       
       // LOGIC CẢNH BÁO QUÁ NHIỆT 
-      if (data.temp >= 31.0) {
+      if (data.temp >= 33.8) {
         data.isFireWarning = true; 
         
         // Gửi Telegram và Lưu Database (chỉ làm 1 lần khi mới bắt đầu cháy)
