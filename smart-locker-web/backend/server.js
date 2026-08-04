@@ -39,6 +39,8 @@ app.use(express.json());
 app.use((req, res, next) => {
   req.io = io;
   req.mqttClient = mqttClient;
+  // TRUYỀN HÀM TELEGRAM SANG CONTROLLER ĐỂ XÀI CHUNG
+  req.sendTelegram = sendTelegramMessage; 
   next();
 });
 
@@ -51,11 +53,10 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log(`>>> [SOCKET] Web ngắt kết nối!`));
 });
 
-// --- XỬ LÝ DỮ LIỆU CẢM BIẾN & CẢNH BÁO ---
+// --- XỬ LÝ DỮ LIỆU CẢM BIẾN & CẢNH BÁO CHÁY ---
 let isFireNotified = false; // Biến chống spam tin nhắn Telegram
 
 mqttClient.subscribe('myCTU/locker/sensor');
-// NHỚ THÊM CHỮ 'async' VÀO ĐÂY
 mqttClient.on('message', async (topic, message) => {
   if (topic === 'myCTU/locker/sensor') {
     try {
@@ -77,12 +78,12 @@ mqttClient.on('message', async (topic, message) => {
             const newLog = new Log({
               thiet_bi: "Tủ Khóa Chính",
               hanh_dong: "🔥 CẢNH BÁO: QUÁ NHIỆT (CHÁY)",
-              chi_tiet: `Nhiệt độ cao bất thường: ${data.temp}°C` // (Bạn có thể bỏ dòng này nếu Schema của bạn không có trường chi_tiet)
+              chi_tiet: `Nhiệt độ cao bất thường: ${data.temp}°C` 
             });
             await newLog.save();
             console.log(">>> [DATABASE] Đã lưu lịch sử cháy nổ!");
 
-            // 3. Bắn realtime ra Web để cập nhật bảng Nhật ký ngay lập tức!
+            // 3. Bắn realtime ra Web để cập nhật bảng Nhật ký
             io.emit('co_nguoi_mo_tu', newLog); 
           } catch (dbErr) {
             console.error(">>> [DATABASE] Lỗi lưu lịch sử:", dbErr);
