@@ -46,7 +46,7 @@ float currentHum = 0.0;
 bool isLockerFull = false;
 
 // BẠN SỬA MỨC NHIỆT ĐỘ TEST Ở ĐÂY (TEST XONG ĐỔI THÀNH 45.0)
-float TEMP_THRESHOLD = 32.9;
+float TEMP_THRESHOLD = 32.8;
 
 // --- CẤU HÌNH BÀN PHÍM ---
 const byte ROWS = 4;
@@ -183,7 +183,7 @@ void openLockerAction()
   drawLockedScreen();
 }
 
-// --- HÀM LẮNG NGHE LỆNH MQTT TỪ WEB ---
+// --- HÀM LẮNG NGHE LỆNH MQTT TỪ WEB (ĐÃ ĐƯỢC CHỈNH SỬA AN TOÀN) ---
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
   String message = "";
@@ -191,19 +191,31 @@ void mqttCallback(char *topic, byte *payload, unsigned int length)
   {
     message += (char)payload[i];
   }
-  Serial.print(">>> [MQTT] Nhan lenh tu Node.js: ");
-  Serial.println(message);
 
-  StaticJsonDocument<200> doc;
-  DeserializationError error = deserializeJson(doc, message);
-  if (error)
-    return;
+  Serial.print(">>> [MQTT] Nhan lenh tu Topic: ");
+  Serial.println(topic);
+  Serial.println(">>> Noi dung: " + message);
 
-  const char *command = doc["command"];
-  if (strcmp(command, "OPEN_DOOR") == 0)
+  // Đảm bảo chỉ xử lý khi nhận lệnh từ đúng kênh điều khiển
+  if (String(topic) == mqtt_topic_control)
   {
-    Serial.println(">>> [XÁC NHẬN] AI nhan dien dung, tien hanh mo tu!");
-    openLockerAction();
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, message);
+
+    if (error)
+    {
+      Serial.println(">>> [LỖI] Khong the doc JSON tu Web!");
+      return;
+    }
+
+    // Dùng kiểu String thay vì char* để tránh lỗi Crash
+    String command = doc["command"].as<String>();
+
+    if (command == "OPEN_DOOR")
+    {
+      Serial.println("🚨 [XÁC NHẬN] NHAN LENH MO CUA KHAN CAP TU WEB!");
+      openLockerAction();
+    }
   }
 }
 
@@ -217,7 +229,7 @@ void reconnectMQTT()
     if (mqttClient.connect(clientId.c_str()))
     {
       Serial.println(" Thanh cong!");
-      mqttClient.subscribe(mqtt_topic_control);
+      mqttClient.subscribe(mqtt_topic_control); // Lắng nghe kênh điều khiển
     }
     else
     {
@@ -268,7 +280,6 @@ void drawInputScreen()
   }
   display.display();
 }
-
 
 void setup()
 {
