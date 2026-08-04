@@ -46,7 +46,7 @@ float currentHum = 0.0;
 bool isLockerFull = false;
 
 // BẠN SỬA MỨC NHIỆT ĐỘ TEST Ở ĐÂY (TEST XONG ĐỔI THÀNH 45.0)
-float TEMP_THRESHOLD = 32.8;
+float TEMP_THRESHOLD = 33.8;
 
 // --- CẤU HÌNH BÀN PHÍM ---
 const byte ROWS = 4;
