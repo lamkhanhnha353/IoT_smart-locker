@@ -11,10 +11,10 @@ const FaceUnlock = () => {
   const [faceScore, setFaceScore] = useState(0); 
   const [circleColor, setCircleColor] = useState("#3b82f6"); 
 
-  // ==========================================
+  
   // THÊM CHỐT CHẶN CHỐNG SPAM API
   const isVerifying = useRef(false); 
-  // ==========================================
+  
 
   const scanInterval = useRef(null);
   const BACKEND_URL = "https://iot-smart-locker.onrender.com";
@@ -34,7 +34,7 @@ const FaceUnlock = () => {
         ]);
         setIsModelLoaded(true);
         setStatus("Sẵn sàng. Hãy nhìn thẳng vào Camera");
-      } catch (error) {
+      } catch {    //catch (error)
         setStatus("Lỗi tải model AI!");
       }
     };
@@ -112,7 +112,7 @@ const FaceUnlock = () => {
           handleVideoPlay();
         }, 2500);
       }
-    } catch (error) {
+    } catch {   //catch (error)
       setStatus("Lỗi kết nối máy chủ!");
       setTimeout(() => {
         isVerifying.current = false; // MỞ KHÓA KHI LỖI MẠNG

@@ -1,10 +1,13 @@
-
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-// Import thư viện Toast
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { useState, useEffect } from 'react';
+
+
+const BACKEND_URL = "https://iot-smart-locker.onrender.com"; // [1. DEPLOY LÊN MẠNG]
+// const BACKEND_URL = "http://192.168.1.25:5000";             // [2. CHẠY TEST LOCAL]
+
 
 const AuthPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -12,7 +15,6 @@ const AuthPage = () => {
 
   useEffect(() => {
     const token = localStorage.getItem('token');
-    // Nếu trong ví đã có vé (tức là đã đăng nhập), thì "đá" thẳng vào Dashboard, không cho ở lại trang Đăng nhập nữa
     if (token) {
       navigate('/dashboard');
     }
@@ -26,19 +28,13 @@ const AuthPage = () => {
     e.preventDefault();
 
     if (isLogin) {
-     
-  try {
-        // Đã bổ sung http://localhost:5000 để đồng bộ với phần Đăng ký
-        // const res = await axios.post('http://localhost:5000/api/auth/login', { username, password });
-        // const res = await axios.post('[https://iot-smart-locker.onrender.com/api/auth/login](https://iot-smart-locker.onrender.com/api/auth/login)', { username, password });
-          const res = await axios.post('https://iot-smart-locker.onrender.com/api/auth/login', { username, password });
+      try {
+        // Đã sử dụng biến BACKEND_URL từ công tắc phía trên
+        const res = await axios.post(`${BACKEND_URL}/api/auth/login`, { username, password });
+        
         if (res.data.success) {
           localStorage.setItem('token', res.data.token);
           localStorage.setItem('username', res.data.user.username);
-          
-          // CÁCH LƯU MỚI: Dùng toán tử 3 ngôi. 
-          // Nếu backend trả về true thì lưu 'true', ngược lại (kể cả undefined) thì lưu 'false'. 
-          // Cách này đảm bảo không bao giờ bị crash code!
           localStorage.setItem('hasFaceId', res.data.hasFaceId ? 'true' : 'false');
           
           toast.success("Đăng nhập thành công!");
@@ -47,18 +43,14 @@ const AuthPage = () => {
       } catch (error) {
         toast.error(error.response?.data?.message || "Lỗi kết nối đến máy chủ!");
       }
-
     } else {
-     
-      // 2. XỬ LÝ ĐĂNG KÝ
-   
       if (password !== confirmPassword) {
         return toast.warn("Mật khẩu xác nhận không khớp!");
       }
 
       try {
-        // const res = await axios.post('http://localhost:5000/api/auth/register', { username, password });
-        const res = await axios.post('https://iot-smart-locker.onrender.com/api/auth/register', { username, password });
+        // Đã sử dụng biến BACKEND_URL từ công tắc phía trên
+        const res = await axios.post(`${BACKEND_URL}/api/auth/register`, { username, password });
     
         if (res.data.success) {
           toast.success("Đăng ký thành công! Hãy đăng nhập nhé.");
@@ -74,9 +66,7 @@ const AuthPage = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-900 p-4">
-      {/* Component chứa thông báo (Giao diện Dark Mode) */}
       <ToastContainer theme="dark" position="top-right" autoClose={2000} />
-
       <div className="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
         
         <div className="text-center mb-8">

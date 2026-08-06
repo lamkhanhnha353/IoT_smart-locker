@@ -11,8 +11,8 @@ const lockerRoutes = require('./routes/lockerRoutes');
 const Log = require('./models/Log');
 
 // --- CẤU HÌNH TELEGRAM (KHÔNG DÙNG THƯ VIỆN) ---
-const TELEGRAM_TOKEN = '8852248223:AAE3wNrDd5-miZY-210RDyzSYwVkcVQaHBM'; 
-const CHAT_ID = '8707369107';        
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN; 
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID;       
 
 // Hàm gọi thẳng API gốc của Telegram siêu nhẹ
 async function sendTelegramMessage(messageText) {
@@ -63,12 +63,12 @@ mqttClient.on('message', async (topic, message) => {
       const data = JSON.parse(message.toString());
       
       // LOGIC CẢNH BÁO QUÁ NHIỆT 
-      if (data.temp >= 33.8) {
+      if (data.temp >= 35.8) {
         data.isFireWarning = true; 
         
         // Gửi Telegram và Lưu Database (chỉ làm 1 lần khi mới bắt đầu cháy)
         if (!isFireNotified) {
-          // 1. Gửi Telegram
+          //1. Gửi Telegram
           const alertMsg = `🚨 BÁO ĐỘNG ĐỎ: TỦ ĐỒ myCTU 🚨\nNhiệt độ hiện tại: ${data.temp}°C\nNguy cơ cháy nổ cao!`;
           sendTelegramMessage(alertMsg);
           console.log(">>> [TELEGRAM] Đã gửi tin nhắn báo cháy!");

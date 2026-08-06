@@ -2,26 +2,39 @@ const Log = require('../models/Log');
 const User = require('../models/User');
 
 // ==========================================
-// HÀM KIỂM TRA AN NINH: ĐẾM SỐ LẦN SAI TRONG 1 PHÚT
+// HÀM KIỂM TRA AN NINH: PHÂN TẦNG CẢNH BÁO
 // ==========================================
 const checkSecurityAlert = async (thiet_bi, req) => {
   try {
     const oneMinuteAgo = new Date(Date.now() - 60 * 1000); // Lùi lại 1 phút
 
-    // Đếm log "Cảnh Báo", "Sai" hoặc "lạ" trong 1 phút qua
+    // Đếm log "Alert", "Sai" hoặc "lạ" trong 1 phút qua (Bắt cả log Anh/Việt)
     const failedCount = await Log.countDocuments({
       thiet_bi: thiet_bi,
       thoi_gian: { $gte: oneMinuteAgo },
-      hanh_dong: { $regex: /Sai|Khuôn mặt lạ|Cảnh Báo/i }
+      hanh_dong: { $regex: /Sai|lạ|Cảnh Báo|Alert|Invalid|Incorrect/i }
     });
 
-    // Nếu sai từ 5 lần trở lên -> Báo động Telegram
-    if (failedCount >= 5) {
-      const msg = `🚨 BÁO ĐỘNG AN NINH TỦ ĐỒ 🚨\nPhát hiện xâm nhập từ [${thiet_bi}].\nĐã thử mở khóa sai ${failedCount} lần trong 1 phút qua!`;
-      
-      // Gọi hàm Telegram đã được truyền từ server.js qua biến req
+    // MỨC 1: Sai đúng 3 lần -> Chỉ nhắn tin Telegram cảnh báo nhẹ
+    if (failedCount === 3) {
+      const msg = `⚠️ SECURITY ALERT LEVEL 1 ⚠️\nSuspicious activity detected from [${thiet_bi}].\n3 failed attempts in the last minute!`;
       if (req.sendTelegram) {
         req.sendTelegram(msg);
+      }
+    }
+
+    // MỨC 2: Sai từ 5 lần trở lên -> Nhắn tin báo động đỏ + Hú còi phần cứng
+    if (failedCount >= 5) {
+      const msg = `🚨 RED SECURITY ALERT 🚨\nIntrusion detected from [${thiet_bi}].\n${failedCount} failed unlock attempts!\nSystem is TRIGGERING LOCAL ALARM!`;
+      
+      if (req.sendTelegram) {
+        req.sendTelegram(msg);
+      }
+
+      // Gửi lệnh hú còi xuống phần cứng thông qua MQTT
+      if (req.mqttClient) {
+        req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'ALARM' }));
+        console.log(`\n>>> [BÁO ĐỘNG] Đã gửi lệnh HÚ CÒI xuống tủ (ESP32)!`);
       }
     }
   } catch (error) {
@@ -51,8 +64,8 @@ exports.controlLocker = async (req, res) => {
       }
 
       const newLog = new Log({
-        thiet_bi: "Tủ Khóa Chính",
-        hanh_dong: "🔓 MỞ CỬA KHẨN CẤP (QUÁ NHIỆT)"
+        thiet_bi: "Main Locker",
+        hanh_dong: "🔓 EMERGENCY UNLOCK (OVERHEAT)"
       });
       await newLog.save();
       
@@ -98,11 +111,10 @@ exports.verifyFaceAndUnlock = async (req, res) => {
       
       req.mqttClient.publish('myCTU/locker/control', JSON.stringify({ command: 'OPEN_DOOR', user: matchedUser }));
       
-      // Xử lý lưu lịch sử Mở cửa Face ID
       try {
         const newLog = new Log({
-          thiet_bi: "Camera AI",
-          hanh_dong: `Mở Khóa Bằng Khuôn Mặt (${matchedUser})`
+          thiet_bi: "AI Camera",
+          hanh_dong: `Unlocked via Face ID (${matchedUser})`
         });
         await newLog.save();
         
@@ -118,10 +130,9 @@ exports.verifyFaceAndUnlock = async (req, res) => {
     } else {
       console.log("\n>>> [CẢNH BÁO AI] Phát hiện khuôn mặt lạ!");
       
-      // Lưu lịch sử thất bại vào DB để làm dữ liệu đếm 
       const errorLog = new Log({
-        thiet_bi: "Camera AI",
-        hanh_dong: "Cảnh Báo: Khuôn mặt lạ"
+        thiet_bi: "AI Camera",
+        hanh_dong: "Alert: Unknown Face Detected"
       });
       await errorLog.save();
       
@@ -129,8 +140,7 @@ exports.verifyFaceAndUnlock = async (req, res) => {
         req.io.emit('co_nguoi_mo_tu', errorLog);
       }
 
-      // TRUYỀN req VÀO ĐỂ GỌI CHỐT KIỂM TRA AN NINH TELEGRAM
-      await checkSecurityAlert("Camera AI", req);
+      await checkSecurityAlert("AI Camera", req);
 
       return res.status(400).json({ success: false, message: "Khuôn mặt lạ hoặc không nhìn rõ!" });
     }
@@ -140,12 +150,20 @@ exports.verifyFaceAndUnlock = async (req, res) => {
   }
 };
 
+// ĐÃ SỬA HÀM NÀY ĐỂ BẮT BIẾN TIẾNG ANH TỪ ESP32
 exports.receiveFromESP32 = async (req, res) => {
   try {
+    // Bắt các biến (device, action, entered_pin) từ req.body (do mạch ESP32 gửi lên)
+    const deviceName = req.body.device || req.body.thiet_bi || "Main Locker";
+    const actionTaken = req.body.action || req.body.hanh_dong || "Unknown Action";
+    const pinAttempted = req.body.entered_pin || req.body.ma_pin_da_nhap;
+
+    console.log(`\n>>> [API LOCAL] Tủ ESP32 vừa báo cáo: ${actionTaken}`); 
+
     const newLog = new Log({
-      thiet_bi: req.body.thiet_bi,
-      hanh_dong: req.body.hanh_dong,
-      ma_pin_da_nhap: req.body.ma_pin_da_nhap
+      thiet_bi: deviceName,
+      hanh_dong: actionTaken,
+      ma_pin_da_nhap: pinAttempted
     });
     await newLog.save();
     
@@ -153,13 +171,15 @@ exports.receiveFromESP32 = async (req, res) => {
       req.io.emit('co_nguoi_mo_tu', newLog);
     }
 
-    // NẾU CÓ CHỮ SAI PIN THÌ GỌI CHỐT KIỂM TRA AN NINH TELEGRAM
-    if (req.body.hanh_dong.includes('Sai')) {
-      await checkSecurityAlert("Tủ Khóa Chính", req);
+    // Cập nhật điều kiện kiểm tra (sai PIN tiếng Anh)
+    if (actionTaken.includes('Incorrect') || actionTaken.includes('Sai')) {
+      console.log(`>>> [AN NINH] Đang kiểm tra số lần sai...`);
+      await checkSecurityAlert(deviceName, req);
     }
 
-    res.json({ message: "Đã lưu log ESP32!" });
+    res.json({ message: "Đã lưu log ESP32 thành công!" });
   } catch (error) {
+    console.error(">>> [LỖI DB] Lỗi lưu log ESP32:", error);
     res.status(500).json({ message: "Lỗi lưu DB!" });
   }
 };

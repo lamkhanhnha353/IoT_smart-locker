@@ -1,7 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as faceapi from 'face-api.js';
-import axios from 'axios'; // Bổ sung import axios
+import axios from 'axios'; 
+
+
+const BACKEND_URL = "https://iot-smart-locker.onrender.com"; // [1. DEPLOY LÊN MẠNG]
+// const BACKEND_URL = "http://192.168.1.25:5000";             // [2. CHẠY TEST LOCAL]
+// ==========================================
 
 const FaceRegistration = () => {
   const navigate = useNavigate();
@@ -45,7 +50,7 @@ const FaceRegistration = () => {
         ]);
         setIsModelLoaded(true);
         setStatusText("Sẵn sàng! Vui lòng làm theo hướng dẫn.");
-      } catch (error) {
+      } catch {                  // catch (error)
         setStatusText("Lỗi tải AI. Vui lòng tải lại trang.");
       }
     };
@@ -103,14 +108,12 @@ const FaceRegistration = () => {
             }
             distance = Math.sqrt(distance);
 
-         
             if (distance < 0.45) {
-         
               try {
                 const token = localStorage.getItem('token'); 
                 
-                // ĐÃ SỬA: Thêm tên miền Backend (Render) vào phía trước
-                await axios.post('https://iot-smart-locker.onrender.com/api/auth/register-face', {
+                // ĐÃ SỬA: Lấy từ biến BACKEND_URL
+                await axios.post(`${BACKEND_URL}/api/auth/register-face`, {
                   descriptor: firstDescriptorRef.current
                 }, {
                   headers: { Authorization: `Bearer ${token}` } 
@@ -132,8 +135,7 @@ const FaceRegistration = () => {
                   navigate('/dashboard'); 
                 }, 2000);
                 
-              } catch (error) {
-                // Nếu Backend báo lỗi (hết hạn token, lỗi DB...)
+              } catch {    //catch (error)
                 vibrate([100, 50, 100]);
                 updateStep(1.5);
                 setStatusText("Lỗi máy chủ! Không thể lưu dữ liệu. Thử lại...");

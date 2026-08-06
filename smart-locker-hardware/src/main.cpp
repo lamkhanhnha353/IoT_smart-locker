@@ -9,13 +9,17 @@
 #include <PubSubClient.h>
 #include <ESP32Servo.h>
 #include "DHT.h"
+#include <WiFiClientSecure.h>
 
-// --- THÔNG TIN MẠNG ---
-const char *ssid = "Co Thanh";
-const char *password = "66666666";
-const char *serverName = "https://iot-smart-locker.onrender.com/api/locker/test";
+// Include your secret credentials here (WiFi SSID & Pass)
+#include "secrets.h"
 
-// --- CẤU HÌNH MQTT BROKER ---
+// ==========================================
+// const char *serverName = "https://iot-smart-locker.onrender.com/api/locker/test"; // [1. RENDER CLOUD DEPLOYMENT]
+const char *serverName = "http://192.168.1.25:5000/api/locker/test"; // [2. LOCAL TESTING]
+// ==========================================
+
+// --- MQTT BROKER CONFIGURATION ---
 const char *mqtt_server = "broker.hivemq.com";
 const int mqtt_port = 1883;
 const char *mqtt_topic_control = "myCTU/locker/control";
@@ -23,7 +27,7 @@ const char *mqtt_topic_control = "myCTU/locker/control";
 WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
-// --- CẤU HÌNH PHẦN CỨNG ---
+// --- HARDWARE CONFIGURATION ---
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
@@ -32,23 +36,23 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 #define SERVO_PIN 19
 Servo lockServo;
 
-// --- CẤU HÌNH CẢM BIẾN MỚI ---
+// --- SENSOR CONFIGURATION ---
 #define DHTPIN 4
 #define DHTTYPE DHT11
 DHT dht(DHTPIN, DHTTYPE);
 
 #define IR_PIN 5
 
-// --- BIẾN LƯU TRỮ TRẠNG THÁI ---
+// --- STATE VARIABLES ---
 unsigned long lastSensorUpdate = 0;
 float currentTemp = 0.0;
 float currentHum = 0.0;
 bool isLockerFull = false;
 
-// BẠN SỬA MỨC NHIỆT ĐỘ TEST Ở ĐÂY (TEST XONG ĐỔI THÀNH 45.0)
-float TEMP_THRESHOLD = 33.8;
+// ADJUST TEMPERATURE THRESHOLD FOR TESTING
+float TEMP_THRESHOLD = 33.9;
 
-// --- CẤU HÌNH BÀN PHÍM ---
+// --- KEYPAD CONFIGURATION ---
 const byte ROWS = 4;
 const byte COLS = 4;
 char hexaKeys[ROWS][COLS] = {
@@ -69,7 +73,7 @@ LockerState currentState = LOCKED;
 String masterPIN = "123456";
 String enteredPIN = "";
 
-// --- CÁC HÀM ÂM THANH ---
+// --- AUDIO FUNCTIONS ---
 void customTone(int pin, int frequency, int duration)
 {
   if (frequency == 0)
@@ -101,12 +105,8 @@ void playErrorSound()
   customTone(BUZZER_PIN, 250, 400);
 }
 
-void playKeyClickSound()
-{
-  customTone(BUZZER_PIN, 1800, 20);
-}
+void playKeyClickSound() { customTone(BUZZER_PIN, 1800, 20); }
 
-// HÀM TIẾNG CÒI HÚ BÁO ĐỘNG
 void playAlarmSound()
 {
   customTone(BUZZER_PIN, 1000, 300);
@@ -115,121 +115,128 @@ void playAlarmSound()
   delay(100);
 }
 
-// --- HÀM GIAO DIỆN CHỜ THÔNG MINH ---
+// --- IDLE SCREEN UI ---
 void drawLockedScreen()
 {
   display.clearDisplay();
-
-  // GÓC TRÊN: Trạng thái tủ
   display.setTextSize(1);
   display.setTextColor(WHITE);
   display.setCursor(0, 0);
   if (isLockerFull)
   {
-    display.print("Tu: DANG CO DO");
+    display.print("Status: OCCUPIED");
   }
   else
   {
-    display.print("Tu: TRONG");
+    display.print("Status: EMPTY");
   }
 
-  // GIỮA: Chữ LOCKED to rõ
   display.setTextSize(2);
   display.setCursor(25, 25);
   display.print("LOCKED");
 
-  // GÓC DƯỚI: Nhiệt độ & Độ ẩm
   display.setTextSize(1);
   display.setCursor(0, 55);
   display.print(currentTemp > 0 ? String(currentTemp, 1) : "--");
   display.print("C | ");
   display.print(currentHum > 0 ? String(currentHum, 0) : "--");
   display.print("%");
-
   display.display();
 }
 
-// --- HÀM MỞ KHÓA TỦ ---
+// --- UNLOCK ACTION ---
 void openLockerAction()
 {
-  Serial.println(">>> [LOCKER] Dang mo chot cua!");
+  Serial.println(">>> [LOCKER] Opening the door!");
   display.clearDisplay();
   display.setTextSize(2);
   display.setCursor(15, 20);
   display.println("UNLOCKED!");
   display.display();
 
-  // 1. Kéo chốt ra (Mở cửa)
   lockServo.write(90);
   playSuccessSound();
 
-  // BẮN TIN BÁO WEB: CỬA ĐANG MỞ!
   String payloadOpen = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": true, \"isFireWarning\": false}";
   mqttClient.publish("myCTU/locker/sensor", payloadOpen.c_str());
 
-  // 2. Chờ sinh viên lấy đồ (5 giây)
   delay(5000);
 
-  // 3. Đẩy chốt lại (Khóa tự động)
   lockServo.write(0);
   currentState = LOCKED;
   enteredPIN = "";
-  Serial.println(">>> [LOCKER] Da khoa tu tu dong!");
+  Serial.println(">>> [LOCKER] Door auto-locked!");
 
-  // BẮN TIN BÁO WEB: CỬA ĐÃ KHÓA!
   String payloadClosed = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": false, \"isFireWarning\": false}";
   mqttClient.publish("myCTU/locker/sensor", payloadClosed.c_str());
 
   drawLockedScreen();
 }
 
-// --- HÀM LẮNG NGHE LỆNH MQTT TỪ WEB (ĐÃ ĐƯỢC CHỈNH SỬA AN TOÀN) ---
+// ==========================================
+// RECEIVE MQTT COMMANDS FROM BACKEND
+// ==========================================
 void mqttCallback(char *topic, byte *payload, unsigned int length)
 {
   String message = "";
   for (unsigned int i = 0; i < length; i++)
-  {
     message += (char)payload[i];
-  }
 
-  Serial.print(">>> [MQTT] Nhan lenh tu Topic: ");
-  Serial.println(topic);
-  Serial.println(">>> Noi dung: " + message);
-
-  // Đảm bảo chỉ xử lý khi nhận lệnh từ đúng kênh điều khiển
   if (String(topic) == mqtt_topic_control)
   {
     StaticJsonDocument<200> doc;
     DeserializationError error = deserializeJson(doc, message);
-
     if (error)
-    {
-      Serial.println(">>> [LỖI] Khong the doc JSON tu Web!");
       return;
-    }
 
-    // Dùng kiểu String thay vì char* để tránh lỗi Crash
     String command = doc["command"].as<String>();
 
     if (command == "OPEN_DOOR")
     {
-      Serial.println("🚨 [XÁC NHẬN] NHAN LENH MO CUA KHAN CAP TU WEB!");
+      Serial.println("🚨 [ACTION] EMERGENCY UNLOCK COMMAND RECEIVED!");
       openLockerAction();
+    }
+    else if (command == "ALARM")
+    {
+      Serial.println("🚨 [ALERT] INTRUSION DETECTED - 15S ALARM TRIGGERED!");
+
+      // Display warning on OLED
+      display.clearDisplay();
+      display.setTextSize(2);
+      display.setTextColor(WHITE);
+      display.setCursor(15, 20);
+      display.println("WARNING!");
+      display.display();
+
+      // ==========================================
+      // ACTIVATE POLICE SIREN (15 SECONDS)
+      // 1 loop takes ~0.5s -> 30 loops = 15 seconds
+      // ==========================================
+      for (int i = 0; i < 30; i++)
+      {
+        customTone(BUZZER_PIN, 3000, 250);
+        delay(30);
+        customTone(BUZZER_PIN, 1500, 250);
+        delay(30);
+      }
+      // ==========================================
+
+      // Return to locked screen after alarm
+      drawLockedScreen();
     }
   }
 }
 
-// --- HÀM GIỮ KẾT NỐI MQTT ---
 void reconnectMQTT()
 {
   while (!mqttClient.connected())
   {
-    Serial.print(">>> [MQTT] Dang ket noi lai...");
+    Serial.print(">>> [MQTT] Reconnecting...");
     String clientId = "ESP32Locker-" + String(random(0, 1000));
     if (mqttClient.connect(clientId.c_str()))
     {
-      Serial.println(" Thanh cong!");
-      mqttClient.subscribe(mqtt_topic_control); // Lắng nghe kênh điều khiển
+      Serial.println(" Connected!");
+      mqttClient.subscribe(mqtt_topic_control);
     }
     else
     {
@@ -238,51 +245,69 @@ void reconnectMQTT()
   }
 }
 
-// --- HÀM GỬI LỊCH SỬ LÊN NODE.JS ---
-// --- HÀM GỬI LỊCH SỬ LÊN NODE.JS (ĐÃ NÂNG CẤP HTTPS) ---
+/* -------------- [1. RENDER CLOUD DEPLOYMENT (HTTPS)] --------------
 void sendDataToServer(bool isSuccess, String pinAttempt)
 {
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    // Tạo client bảo mật và bỏ qua check chứng chỉ SSL
+  if (WiFi.status() == WL_CONNECTED) {
     WiFiClientSecure *client = new WiFiClientSecure;
     client->setInsecure();
-
     HTTPClient http;
     http.begin(*client, serverName);
     http.addHeader("Content-Type", "application/json");
 
     StaticJsonDocument<200> doc;
-    doc["thiet_bi"] = "Tủ Khóa Chính";
-    doc["hanh_dong"] = isSuccess ? "Mở Khóa Bằng PIN" : "Cảnh Báo: Sai Mật Khẩu";
-    doc["ma_pin_da_nhap"] = pinAttempt;
+    doc["device"] = "Main Locker";
+    doc["action"] = isSuccess ? "Unlocked via PIN" : "Alert: Incorrect PIN";
+    doc["entered_pin"] = pinAttempt;
+
+    String requestBody; serializeJson(doc, requestBody);
+    int httpResponseCode = http.POST(requestBody);
+
+    if (httpResponseCode > 0) Serial.println(">>> [SERVER] Log sent to Render successfully!");
+    else Serial.println(">>> [ERROR] Failed to send log. HTTP Code: " + String(httpResponseCode));
+
+    http.end(); delete client;
+  }
+}
+----------------------------------------------------------------- */
+
+// -------------- [2. LOCAL TESTING (HTTP)] --------------
+void sendDataToServer(bool isSuccess, String pinAttempt)
+{
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFiClient client;
+    HTTPClient http;
+    http.begin(client, serverName);
+    http.addHeader("Content-Type", "application/json");
+
+    StaticJsonDocument<200> doc;
+    doc["device"] = "Main Locker";
+    doc["action"] = isSuccess ? "Unlocked via PIN" : "Alert: Incorrect PIN";
+    doc["entered_pin"] = pinAttempt;
 
     String requestBody;
     serializeJson(doc, requestBody);
-
     int httpResponseCode = http.POST(requestBody);
+
     if (httpResponseCode > 0)
-    {
-      Serial.println(">>> [SERVER] Da gui Log len Render thanh cong!");
-    }
+      Serial.println(">>> [SERVER] Log sent to Local Server successfully!");
     else
-    {
-      Serial.println(">>> [LỖI] Khong the gui Log. Ma loi: " + String(httpResponseCode));
-    }
+      Serial.println(">>> [ERROR] Failed to send log. HTTP Code: " + String(httpResponseCode));
 
     http.end();
-    delete client; // Giải phóng bộ nhớ
   }
 }
+// -----------------------------------------------------------------
 
-// --- HÀM VẼ GIAO DIỆN NHẬP PIN ---
+// --- PIN INPUT SCREEN UI ---
 void drawInputScreen()
 {
   display.clearDisplay();
   display.setTextColor(WHITE);
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("Vui long nhap ma PIN:");
+  display.println("Please enter PIN:");
   display.setTextSize(2);
   display.setCursor(28, 30);
   for (int i = 0; i < 6; i++)
@@ -299,12 +324,9 @@ void setup()
 {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
-
-  // KHỞI TẠO CẢM BIẾN
   dht.begin();
   pinMode(IR_PIN, INPUT);
 
-  // KHỞI TẠO SERVO
   ESP32PWM::allocateTimer(0);
   lockServo.setPeriodHertz(50);
   lockServo.attach(SERVO_PIN, 500, 2400);
@@ -321,13 +343,13 @@ void setup()
   display.println("CONNECTING WIFI...");
   display.display();
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(SECRET_SSID, SECRET_PASS);
   while (WiFi.status() != WL_CONNECTED)
   {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\n[WIFI] Da ket noi!");
+  Serial.println("\n[WIFI] Connected!");
 
   mqttClient.setServer(mqtt_server, mqtt_port);
   mqttClient.setCallback(mqttCallback);
@@ -341,7 +363,6 @@ void loop()
     reconnectMQTT();
   mqttClient.loop();
 
-  // --- CẬP NHẬT CẢM BIẾN NGẦM & CẢNH BÁO ---
   if (currentState == LOCKED)
   {
     if (millis() - lastSensorUpdate >= 2000)
@@ -357,13 +378,10 @@ void loop()
         currentHum = h;
       }
 
-      // Xử lý Cảnh báo nhiệt độ
       bool isFireWarning = false;
       if (currentTemp >= TEMP_THRESHOLD)
       {
         isFireWarning = true;
-        Serial.println(">>> [CẢNH BÁO] Nhiệt độ trong tủ quá cao! Hú còi!");
-
         display.clearDisplay();
         display.setTextColor(WHITE);
         display.setTextSize(2);
@@ -371,11 +389,10 @@ void loop()
         display.println("WARNING!");
         display.setTextSize(1);
         display.setCursor(15, 40);
-        display.print("Nhiet do: ");
+        display.print("Temp: ");
         display.print(currentTemp);
         display.print(" C");
         display.display();
-
         playAlarmSound();
       }
       else
@@ -383,14 +400,11 @@ void loop()
         drawLockedScreen();
       }
 
-      // Đóng gói data gửi lên Web
       String payload = "{\"temp\":" + String(currentTemp) + ",\"humidity\":" + String(currentHum) + ",\"isFull\":" + (isLockerFull ? "true" : "false") + ",\"isDoorOpen\": false, \"isFireWarning\": " + (isFireWarning ? "true" : "false") + "}";
       mqttClient.publish("myCTU/locker/sensor", payload.c_str());
-      Serial.println(">>> [MQTT] Đã gửi data: " + payload);
     }
   }
 
-  // --- XỬ LÝ BÀN PHÍM ---
   char customKey = customKeypad.getKey();
   if (customKey)
   {
@@ -424,11 +438,10 @@ void loop()
           display.clearDisplay();
           display.setTextSize(2);
           display.setCursor(15, 20);
-          display.println("SAI PASS!");
+          display.println("WRONG PIN!");
           display.display();
           playErrorSound();
           delay(1500);
-
           currentState = LOCKED;
           enteredPIN = "";
           drawLockedScreen();
